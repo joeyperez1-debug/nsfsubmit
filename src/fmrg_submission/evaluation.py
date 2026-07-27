@@ -9,7 +9,16 @@ import pandas as pd
 from scipy.signal import savgol_filter
 from sklearn.base import clone
 
-from .modeling import fit_hierarchical_candidate
+from .modeling import (
+    fit_hierarchical_candidate,
+    group_robust_conformal_half_width,
+    interval_metrics,
+)
+from .uncertainty import (
+    fit_local_scale,
+    normalized_conformal_interval,
+    predict_local_scale,
+)
 
 
 def _finite_mean(values: list[float]) -> float:
@@ -148,7 +157,6 @@ def nested_leave_one_track_out(
     coverage: float = 0.90,
 ) -> dict[str, object]:
     """Select models in inner track folds and evaluate each untouched outer track."""
-    del coverage  # Conditional calibration is integrated in the next task.
     tracks = sorted(int(track) for track in data["track_id"].unique())
     if len(tracks) < 4:
         raise ValueError("Nested evaluation requires at least four tracks")
@@ -220,6 +228,30 @@ def nested_leave_one_track_out(
             raise RuntimeError(f"Every candidate failed for outer Track {outer_track}")
         selected_features = feature_sets[str(selected["feature_set"])]
         selected_factory = estimator_factories[str(selected["model"])]
+        calibration_predictions: list[pd.DataFrame] = []
+        for calibration_track in sorted(outer_train["track_id"].unique()):
+            calibration_train = outer_train[
+                outer_train["track_id"] != calibration_track
+            ]
+            calibration_test = outer_train[
+                outer_train["track_id"] == calibration_track
+            ]
+            calibration_prediction = fit_hierarchical_candidate(
+                calibration_train,
+                calibration_test,
+                local_features=selected_features,
+                summary_features=[
+                    f"{feature}__median" for feature in selected_features
+                ],
+                estimator=_instantiate(selected_factory),
+            )
+            for feature in selected_features:
+                calibration_prediction[feature] = calibration_test[
+                    feature
+                ].to_numpy()
+            calibration_predictions.append(calibration_prediction)
+        calibration = pd.concat(calibration_predictions, ignore_index=True)
+
         prediction = fit_hierarchical_candidate(
             outer_train,
             outer_test,
@@ -228,6 +260,50 @@ def nested_leave_one_track_out(
                 f"{feature}__median" for feature in selected_features
             ],
             estimator=_instantiate(selected_factory),
+        )
+        residuals = np.abs(
+            calibration["width_mm"].to_numpy(dtype=float)
+            - calibration["width_prediction_mm"].to_numpy(dtype=float)
+        )
+        scale_model = fit_local_scale(
+            calibration,
+            residuals,
+            feature_columns=selected_features,
+        )
+        calibration_scale = predict_local_scale(
+            scale_model,
+            calibration,
+            feature_columns=selected_features,
+        )
+        test_scale = predict_local_scale(
+            scale_model,
+            outer_test,
+            feature_columns=selected_features,
+        )
+        local_lower, local_upper, local_quantile = (
+            normalized_conformal_interval(
+                calibration["width_mm"].to_numpy(dtype=float),
+                calibration["width_prediction_mm"].to_numpy(dtype=float),
+                calibration_scale,
+                prediction["width_prediction_mm"].to_numpy(dtype=float),
+                test_scale,
+                coverage=coverage,
+                groups_cal=calibration["track_id"].to_numpy(),
+            )
+        )
+        global_half_width = group_robust_conformal_half_width(
+            residuals,
+            calibration["track_id"].to_numpy(),
+            coverage=coverage,
+        )
+        prediction["predicted_residual_scale_mm"] = test_scale
+        prediction["width_lower_90_mm"] = local_lower
+        prediction["width_upper_90_mm"] = local_upper
+        prediction["global_width_lower_90_mm"] = (
+            prediction["width_prediction_mm"] - global_half_width
+        )
+        prediction["global_width_upper_90_mm"] = (
+            prediction["width_prediction_mm"] + global_half_width
         )
         prediction["outer_track"] = outer_track
         prediction["selected_feature_set"] = selected["feature_set"]
@@ -238,12 +314,57 @@ def nested_leave_one_track_out(
             "selected_model": selected["model"],
             "inner_metrics": selected["metrics"],
             "outer_metrics": track_balanced_metrics(prediction),
+            "conditional_interval": {
+                **interval_metrics(
+                    prediction["width_mm"].to_numpy(),
+                    local_lower,
+                    local_upper,
+                ),
+                "normalized_quantile": local_quantile,
+            },
+            "global_interval": {
+                **interval_metrics(
+                    prediction["width_mm"].to_numpy(),
+                    prediction["global_width_lower_90_mm"].to_numpy(),
+                    prediction["global_width_upper_90_mm"].to_numpy(),
+                ),
+                "half_width_mm": global_half_width,
+            },
         }
 
     predictions = pd.concat(outer_predictions, ignore_index=True)
+    conditional = interval_metrics(
+        predictions["width_mm"].to_numpy(),
+        predictions["width_lower_90_mm"].to_numpy(),
+        predictions["width_upper_90_mm"].to_numpy(),
+    )
+    global_interval = interval_metrics(
+        predictions["width_mm"].to_numpy(),
+        predictions["global_width_lower_90_mm"].to_numpy(),
+        predictions["global_width_upper_90_mm"].to_numpy(),
+    )
+    difficulty_rank = predictions["predicted_residual_scale_mm"].rank(
+        method="first"
+    )
+    terciles = pd.qcut(
+        difficulty_rank, q=3, labels=["low", "medium", "high"]
+    )
+    by_difficulty: dict[str, dict[str, float]] = {}
+    for label in ("low", "medium", "high"):
+        mask = np.asarray(terciles == label)
+        by_difficulty[label] = interval_metrics(
+            predictions.loc[mask, "width_mm"].to_numpy(),
+            predictions.loc[mask, "width_lower_90_mm"].to_numpy(),
+            predictions.loc[mask, "width_upper_90_mm"].to_numpy(),
+        )
     return {
         "predictions": predictions,
         "metrics": track_balanced_metrics(predictions),
         "outer_folds": outer_folds,
         "inner_scores": all_inner_scores,
+        "uncertainty": {
+            "conditional": conditional,
+            "global": global_interval,
+            "conditional_by_difficulty": by_difficulty,
+        },
     }

@@ -96,3 +96,26 @@ def test_track_balanced_mae_weights_tracks_equally():
     metrics = track_balanced_metrics(predictions)
 
     assert np.isclose(metrics["track_balanced_width_mae_mm"], 0.55)
+
+
+def test_nested_evaluation_calibrates_global_and_local_intervals_from_inner_folds():
+    result = nested_leave_one_track_out(
+        _synthetic_four_track_data(),
+        feature_sets={"thermal": ["thermal"]},
+        estimator_factories={"ridge": _ridge_factory},
+        coverage=0.90,
+    )
+
+    required = {
+        "width_lower_90_mm",
+        "width_upper_90_mm",
+        "global_width_lower_90_mm",
+        "global_width_upper_90_mm",
+        "predicted_residual_scale_mm",
+    }
+    assert required.issubset(result["predictions"].columns)
+    assert (
+        result["predictions"]["width_upper_90_mm"]
+        > result["predictions"]["width_lower_90_mm"]
+    ).all()
+    assert {"conditional", "global"} <= result["uncertainty"].keys()
