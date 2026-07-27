@@ -1,4 +1,4 @@
-"""Create and execute the audited final-submission notebook."""
+"""Create and execute the improved FMRG final-submission notebook."""
 
 from __future__ import annotations
 
@@ -34,31 +34,33 @@ def build_notebook():
     notebook["cells"] = [
         markdown(
             """
-            # FMRG Final Submission: Audited Local Geometry Prediction
+            # FMRG Final Submission: Hierarchical Local Geometry Prediction
 
             This executed notebook is the compact submission record for predicting spatially
-            varying DED track width and left/right boundaries from thermal history.
+            varying DED track width, center, and left/right boundaries from causal thermal history.
 
-            **Locked protocol:** model selection and uncertainty calibration use Tracks 8, 10,
-            and 14 only. Track 21 is opened once for final scoring.
+            **Evaluation protocol:** each of Tracks 8, 10, 14, and 21 is held out once. Feature
+            family, estimator, preprocessing, and calibration are selected by leave-one-track-out
+            validation using only the other three tracks. Headline metrics are unweighted means
+            across the four untouched outer tracks.
             """
         ),
         markdown(
             """
             ## Reproducibility
 
-            The full raw-data pipeline is implemented in `scripts/run_final_analysis.py`.
-            Recreate the tracked outputs with:
+            Recreate the tracked outputs from the official Zenodo release with:
 
             ```bash
-            python scripts/run_final_analysis.py \
+            PYTHONPATH=src LOKY_MAX_CPU_COUNT=1 MPLBACKEND=Agg \
+              .venv/bin/python scripts/run_improvement_experiments.py \
               --raw-dir /path/to/extracted/zenodo/data \
-              --output-dir results/final_submission
+              --cache-dir /path/to/cache \
+              --output-dir results/improved_submission
             ```
 
-            The official Zenodo archives were verified against the record's MD5 checksums before
-            analysis. This notebook reads the tracked, locked results so it executes without
-            redistributing the large raw archives.
+            The notebook reads the tracked outer-fold predictions and locked metrics so it can
+            execute without redistributing the large raw archives.
             """
         ),
         code(
@@ -69,169 +71,203 @@ def build_notebook():
             from IPython.display import Image, display
 
             ROOT = Path.cwd()
-            if not (ROOT / "results/final_submission/metrics.json").exists():
+            if not (ROOT / "results/improved_submission/metrics.json").exists():
                 ROOT = ROOT.parent
 
-            RESULTS = ROOT / "results/final_submission"
+            RESULTS = ROOT / "results/improved_submission"
             metrics = json.loads((RESULTS / "metrics.json").read_text())
-            metrics["data_split"]
+            predictions = pd.read_csv(RESULTS / "outer_fold_predictions.csv")
+            metrics["protocol"]
             """
         ),
         markdown(
             """
-            ## Audit corrections
+            ## Model: condition baseline plus local residual
 
-            The prior report/deck asserted a 21.18 micrometer MAE, positive R-squared, a Random
-            Forest result, and dominant SEM importance. Those claims were not produced by the
-            supplied notebook. This submission replaces them with a reproduced notebook baseline
-            and an audited pipeline evaluated on the same untouched Track 21 samples.
+            A single regressor tends to blur two effects: the mean width shift between laser
+            conditions and the smaller spatial fluctuations within a track. The promoted model
+            separates them:
+
+            1. track-level thermal summaries predict baseline center and baseline log-width;
+            2. frame-level thermal history predicts local center and log-width residuals;
+            3. width is reconstructed with an exponential transform, so it is positive; and
+            4. left/right boundaries are reconstructed from shared center and width, so they
+               cannot cross.
+
+            The candidate ladder includes Ridge, elastic net, partial least squares,
+            spline-Ridge, and a low-capacity Gaussian process. Thermal descriptors include melt
+            pool shape, temperature distribution, gradients, asymmetry, cooling tail, motion,
+            persistence, and causal 5-, 10-, and 20-frame history.
             """
         ),
         code(
             """
-            baseline = metrics["baseline"]
-            corrected = metrics["corrected"]
+            incumbent = metrics["incumbent"]["metrics"]
+            promoted = metrics["candidates"]["nested_metrics"]
 
-            comparison = pd.DataFrame(
-                [
+            rows = []
+            for name, values in [
+                ("Direct Ridge incumbent", incumbent),
+                ("Nested hierarchical selector", promoted),
+            ]:
+                rows.append(
                     {
-                        "model": "Notebook Gradient Boosting",
-                        "development_CV_MAE_mm": baseline["development_oof_metrics"]["mae_mm"],
-                        "Track21_MAE_mm": baseline["test_metrics"]["mae_mm"],
-                        "Track21_RMSE_mm": baseline["test_metrics"]["rmse_mm"],
-                        "Track21_R2": baseline["test_metrics"]["r2"],
-                        "interval_coverage": baseline["test_interval_metrics"]["coverage"],
-                        "interval_width_mm": baseline["test_interval_metrics"]["mean_width_mm"],
-                    },
-                    {
-                        "model": "Audited Ridge alpha=10",
-                        "development_CV_MAE_mm": corrected["development_oof_metrics"]["mae_mm"],
-                        "Track21_MAE_mm": corrected["test_metrics"]["mae_mm"],
-                        "Track21_RMSE_mm": corrected["test_metrics"]["rmse_mm"],
-                        "Track21_R2": corrected["test_metrics"]["r2"],
-                        "interval_coverage": corrected["test_interval_metrics"]["coverage"],
-                        "interval_width_mm": corrected["test_interval_metrics"]["mean_width_mm"],
-                    },
-                ]
-            )
+                        "model": name,
+                        "track_balanced_width_MAE_mm": values["track_balanced_width_mae_mm"],
+                        "worst_track_MAE_mm": values["worst_track_width_mae_mm"],
+                        "mean_boundary_MAE_mm": values["mean_boundary_mae_mm"],
+                        "residual_correlation": values["residual_correlation"],
+                        "variation_std_ratio": values["variation_std_ratio"],
+                    }
+                )
+            comparison = pd.DataFrame(rows).set_index("model")
             comparison.round(4)
             """
         ),
         code(
             """
-            improvement = metrics["held_out_mae_improvement_percent"]
-            print(f"Held-out MAE improvement: {improvement:.1f}%")
-            print(
-                "Interpretation: the audited model is better on the untouched condition, "
-                "but negative R^2 and interval under-coverage prevent a deployment claim."
+            improvement = 100 * (
+                incumbent["track_balanced_width_mae_mm"]
+                - promoted["track_balanced_width_mae_mm"]
+            ) / incumbent["track_balanced_width_mae_mm"]
+            worst_improvement = 100 * (
+                incumbent["worst_track_width_mae_mm"]
+                - promoted["worst_track_width_mae_mm"]
+            ) / incumbent["worst_track_width_mae_mm"]
+            boundary_improvement = 100 * (
+                incumbent["mean_boundary_mae_mm"]
+                - promoted["mean_boundary_mae_mm"]
+            ) / incumbent["mean_boundary_mae_mm"]
+            print(f"Track-balanced width MAE improvement: {improvement:.1f}%")
+            print(f"Worst-track MAE improvement: {worst_improvement:.1f}%")
+            print(f"Mean boundary MAE improvement: {boundary_improvement:.1f}%")
+            """
+        ),
+        markdown(
+            """
+            ## Four untouched outer tests
+
+            The promoted selector uses normalized compact thermal features with spline-Ridge in
+            three of four outer folds. Track 14 independently selects normalized multiscale
+            features with Ridge. This is the honest output of nested selection, not a single
+            configuration tuned against all four labels.
+            """
+        ),
+        code(
+            """
+            per_track = promoted["per_track"]
+            pd.DataFrame(
+                [
+                    {
+                        "track": int(track),
+                        "width_MAE_mm": values["width_mae_mm"],
+                        "boundary_MAE_mm": values["mean_boundary_mae_mm"],
+                        "residual_correlation": values["residual_correlation"],
+                        "variation_std_ratio": values["variation_std_ratio"],
+                    }
+                    for track, values in per_track.items()
+                ]
+            ).sort_values("track").round(4)
+            """
+        ),
+        code(
+            """
+            display(
+                Image(
+                    filename=str(RESULTS / "figures/nested_outer_predictions.png"),
+                    width=1100,
+                )
             )
             """
         ),
         markdown(
             """
-            ## Local geometry target
+            ## Conditional uncertainty
 
-            Each profilometer cross-section is robustly detrended. Connected 30%-of-peak crossings
-            around the central bead maximum define the local left and right boundaries; width is
-            their difference. Invalid acquisition gaps remain excluded. Thermal frames map to the
-            physical x-axis using 10 mm/s at 50 fps, or 0.2 mm per frame.
+            Normalized conformal calibration scales intervals by predicted local difficulty.
+            The selected conditional method is closer to the 90% target and narrower on average
+            than a single global interval. Interval width grows from easy to difficult regions,
+            which is the intended behavior.
             """
         ),
         code(
             """
-            boundary = metrics["boundary_metrics"]
-            pd.DataFrame(
+            uncertainty = metrics["uncertainty"]
+            summary = pd.DataFrame(
                 [
-                    {"signal": "left boundary", **boundary["left"]},
-                    {"signal": "right boundary", **boundary["right"]},
-                    {
-                        "signal": "mean boundary MAE",
-                        "mae_mm": boundary["mean_boundary_mae_mm"],
-                        "rmse_mm": float("nan"),
-                        "r2": float("nan"),
-                    },
+                    {"method": "conditional", **uncertainty["conditional"]},
+                    {"method": "global", **uncertainty["global"]},
                 ]
-            ).round(4)
-            """
-        ),
-        markdown(
-            """
-            ## Model selection and SEM ablation
-
-            Candidate models and feature families are compared by leave-one-track-out development
-            cross-validation. Masked SEM is tested as a substrate-only feature family, not assumed
-            beneficial.
-            """
-        ),
-        code(
-            """
-            candidates = corrected["candidate_cv_mae_mm"]
-            (
-                pd.Series(candidates, name="grouped_CV_MAE_mm")
-                .sort_values()
-                .rename_axis("candidate")
-                .to_frame()
+            ).set_index("method")
+            display(summary.round(4))
+            display(
+                pd.DataFrame(uncertainty["conditional_by_difficulty"])
+                .T.rename_axis("difficulty")
                 .round(4)
             )
             """
         ),
         code(
             """
-            print("Selected model:", corrected["model_name"])
-            print("Selected feature family:", corrected["feature_set"])
-            print("Masked SEM selected:", metrics["masked_sem_selected"])
-            """
-        ),
-        markdown(
-            """
-            ## Held-out spatial predictions and uncertainty
-
-            The interval half-width is calibrated from grouped development residuals only. Observed
-            Track 21 coverage is reported directly, even though it falls below the nominal 90%.
-            """
-        ),
-        code(
-            """
             display(
                 Image(
-                    filename=str(RESULTS / "figures/track21_held_out_comparison.png"),
-                    width=1050,
+                    filename=str(RESULTS / "figures/before_after_scorecard.png"),
+                    width=1000,
                 )
             )
             """
         ),
         markdown(
             """
-            ## Interpretable thermal links
+            ## SEM ablation and interpretation
 
-            Validation permutation importance identifies hot-region mean temperature and thermal
-            mass as the strongest predictive associations. These features reflect melt-pool thermal
-            state and short process memory; importance is not a causal substrate/process separation.
+            The available SEM is post-process. The processed center band is masked and the
+            remaining flank texture is evaluated only as an ablation. It is selected in zero
+            outer folds. Therefore this submission makes no causal claim that pre-existing
+            substrate texture drives geometry.
+
+            Interpretable thermal links come from the selected descriptor families: track-level
+            hot area, maximum temperature, thermal mass, and cooling-tail summaries explain the
+            condition baseline; normalized local shape, temperature, asymmetry, and history
+            explain residual variation. These are predictive associations, not causal effects.
             """
         ),
         code(
             """
-            display(
-                Image(
-                    filename=str(RESULTS / "figures/feature_importance.png"),
-                    width=900,
-                )
-            )
+            metrics["sem_ablation"]
+            """
+        ),
+        markdown(
+            """
+            ## Historical Track 21 benchmark
+
+            The earlier audited split achieved 0.139 mm Track 21 MAE versus 0.159 mm for the
+            original notebook. That number is retained only as a historical benchmark. Under the
+            stronger four-track nested protocol, Track 21 receives no special tuning and scores
+            0.219 mm. The two numbers answer different questions and must not be combined.
+            """
+        ),
+        code(
+            """
+            metrics["historical_benchmark"]
             """
         ),
         markdown(
             """
             ## Honest conclusion
 
-            - Track 21 local-width MAE improves from **0.159 mm to 0.139 mm** (12.3%).
-            - Development grouped-CV MAE improves from **0.137 mm to 0.088 mm**.
-            - Held-out R-squared remains **-0.58**.
-            - Nominal 90% intervals cover **76.5%** of held-out samples.
-            - Mean left/right boundary MAE is **0.174 mm**.
-            - Masked SEM worsens grouped CV and is not selected.
+            - Four-track width MAE improves from **0.187 mm to 0.163 mm** (**13.1%**).
+            - Worst-track MAE improves from **0.308 mm to 0.219 mm** (**28.9%**).
+            - Mean boundary MAE improves from **0.180 mm to 0.148 mm** (**17.6%**).
+            - Residual correlation improves from **0.055 to 0.124**, and predicted variation
+              amplitude rises from **21% to 36%** of measured variation.
+            - Conditional intervals achieve **91.4%** coverage with **0.738 mm** mean width,
+              versus **94.2%** and **0.824 mm** for the global interval.
+            - Track-balanced R-squared remains **-0.34**; this is a stronger benchmark, not a
+              closed-loop-ready controller.
 
-            The contribution is a reproducible, leakage-controlled benchmark and spatial pipeline,
-            not a closed-loop-ready controller.
+            The next decisive experiment is registered pre-process surface measurement across
+            more plates, powers, and repeats.
             """
         ),
         markdown(
@@ -239,8 +275,8 @@ def build_notebook():
             ## Generative AI disclosure
 
             OpenAI Codex assisted with code review, test generation, debugging, and artifact
-            layout. Reported metrics were produced by the tracked analysis code and verified
-            against saved predictions; AI did not supply or alter experimental measurements.
+            layout. Reported metrics were produced by tracked analysis code and saved outer-fold
+            predictions; AI did not supply or alter experimental measurements.
             """
         ),
         markdown(
@@ -249,7 +285,8 @@ def build_notebook():
 
             - Official dataset: https://doi.org/10.5281/zenodo.21285367
             - Dataset paper: https://arxiv.org/abs/2607.07965
-            - Locked metrics: `results/final_submission/metrics.json`
+            - Locked metrics: `results/improved_submission/metrics.json`
+            - Outer predictions: `results/improved_submission/outer_fold_predictions.csv`
             """
         ),
     ]

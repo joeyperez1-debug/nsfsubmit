@@ -1,4 +1,4 @@
-"""Build the compliant three-page audited FMRG final report."""
+"""Build the compliant three-page improved FMRG final report."""
 
 from __future__ import annotations
 
@@ -26,8 +26,8 @@ from reportlab.platypus import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-METRICS_PATH = ROOT / "results/final_submission/metrics.json"
-FIGURES = ROOT / "results/final_submission/figures"
+METRICS_PATH = ROOT / "results/improved_submission/metrics.json"
+FIGURES = ROOT / "results/improved_submission/figures"
 OUTPUT = ROOT / "deliverables/report/FMRG_Final_Report_Audited.pdf"
 
 NAVY = colors.HexColor("#061E2B")
@@ -56,31 +56,31 @@ def styles():
             fontSize=10,
             leading=12,
             textColor=BLUE,
-            spaceAfter=8,
+            spaceAfter=7,
         ),
         "title": ParagraphStyle(
             "Title",
             fontName="Arial-Bold",
-            fontSize=24,
-            leading=27,
+            fontSize=23,
+            leading=26,
             textColor=NAVY,
-            spaceAfter=7,
+            spaceAfter=6,
         ),
         "subtitle": ParagraphStyle(
             "Subtitle",
             fontName="Arial",
             fontSize=10,
-            leading=13,
+            leading=12,
             textColor=MUTED,
-            spaceAfter=9,
+            spaceAfter=7,
         ),
         "h1": ParagraphStyle(
             "H1",
             fontName="Arial-Bold",
-            fontSize=16,
-            leading=19,
+            fontSize=15,
+            leading=17,
             textColor=NAVY,
-            spaceAfter=5,
+            spaceAfter=4,
         ),
         "h2": ParagraphStyle(
             "H2",
@@ -88,36 +88,36 @@ def styles():
             fontSize=11,
             leading=13,
             textColor=BLUE,
-            spaceBefore=4,
-            spaceAfter=3,
+            spaceBefore=3,
+            spaceAfter=2,
         ),
         "body": ParagraphStyle(
             "Body",
             fontName="Arial",
             fontSize=10,
-            leading=12.2,
+            leading=11.8,
             textColor=INK,
-            spaceAfter=4,
+            spaceAfter=3,
         ),
         "small": ParagraphStyle(
             "Small",
             fontName="Arial",
             fontSize=10,
-            leading=11.5,
+            leading=11.3,
             textColor=MUTED,
         ),
         "callout": ParagraphStyle(
             "Callout",
             fontName="Arial-Bold",
             fontSize=10,
-            leading=12.5,
+            leading=12,
             textColor=NAVY,
         ),
         "metric": ParagraphStyle(
             "Metric",
             fontName="Arial-Bold",
             fontSize=16,
-            leading=18,
+            leading=17,
             textColor=BLUE,
             alignment=TA_CENTER,
         ),
@@ -125,7 +125,7 @@ def styles():
             "MetricLabel",
             fontName="Arial",
             fontSize=10,
-            leading=11,
+            leading=10.8,
             textColor=MUTED,
             alignment=TA_CENTER,
         ),
@@ -133,14 +133,14 @@ def styles():
             "Table",
             fontName="Arial",
             fontSize=10,
-            leading=11.5,
+            leading=11,
             textColor=INK,
         ),
         "table_head": ParagraphStyle(
             "TableHead",
             fontName="Arial-Bold",
             fontSize=10,
-            leading=11.5,
+            leading=11,
             textColor=WHITE,
         ),
     }
@@ -152,7 +152,7 @@ def footer(canvas, doc):
     canvas.line(inch, 0.63 * inch, 7.5 * inch, 0.63 * inch)
     canvas.setFillColor(MUTED)
     canvas.setFont("Arial", 8)
-    canvas.drawString(inch, 0.44 * inch, "FMRG Data Challenge - Audited Final Submission")
+    canvas.drawString(inch, 0.44 * inch, "FMRG Data Challenge - Final Submission")
     canvas.drawRightString(7.5 * inch, 0.44 * inch, str(doc.page))
     canvas.restoreState()
 
@@ -161,12 +161,12 @@ def section(title, style):
     return KeepTogether(
         [
             Paragraph(title, style["h1"]),
-            HRFlowable(width="100%", thickness=1.4, color=BLUE, spaceAfter=6),
+            HRFlowable(width="100%", thickness=1.3, color=BLUE, spaceAfter=5),
         ]
     )
 
 
-def table(rows, style, widths):
+def report_table(rows, style, widths):
     cells = []
     for row_index, row in enumerate(rows):
         cell_style = style["table_head"] if row_index == 0 else style["table"]
@@ -177,8 +177,10 @@ def table(rows, style, widths):
             [
                 ("BACKGROUND", (0, 0), (-1, 0), NAVY),
                 ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, colors.HexColor("#F7F9FA")]),
-                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CDD4DA")),
+                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CBD3D9")),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
                 ("TOPPADDING", (0, 0), (-1, -1), 4),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
             ]
@@ -187,23 +189,24 @@ def table(rows, style, widths):
     return result
 
 
-def metric_card(value, label, style):
-    result = Table(
+def metric_strip(items, style):
+    cells = [
         [
-            [Paragraph(value, style["metric"])],
-            [Paragraph(label, style["metric_label"])],
-        ],
-        colWidths=[1.55 * inch],
-        rowHeights=[0.28 * inch, 0.32 * inch],
-    )
+            Paragraph(value, style["metric"]),
+            Paragraph(label, style["metric_label"]),
+        ]
+        for value, label in items
+    ]
+    result = Table([cells], colWidths=[6.5 * inch / len(items)] * len(items))
     result.setStyle(
         TableStyle(
             [
                 ("BACKGROUND", (0, 0), (-1, -1), PALE),
-                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#CFD7DD")),
+                ("BOX", (0, 0), (-1, -1), 0.7, colors.HexColor("#CAD3DA")),
+                ("INNERGRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CAD3DA")),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("TOPPADDING", (0, 0), (-1, -1), 2),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ("TOPPADDING", (0, 0), (-1, -1), 7),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
             ]
         )
     )
@@ -211,222 +214,269 @@ def metric_card(value, label, style):
 
 
 def bullet(text, style):
-    return Paragraph(f"- {text}", style["body"])
+    return Paragraph(f"&#8226;&nbsp; {text}", style["body"])
 
 
 def build_report():
     register_fonts()
     style = styles()
     metrics = json.loads(METRICS_PATH.read_text())
-    baseline = metrics["baseline"]
-    corrected = metrics["corrected"]
-    boundary = metrics["boundary_metrics"]
+    incumbent = metrics["incumbent"]["metrics"]
+    promoted = metrics["candidates"]["nested_metrics"]
+    uncertainty = metrics["uncertainty"]
 
-    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+    improvement = 100 * (
+        incumbent["track_balanced_width_mae_mm"]
+        - promoted["track_balanced_width_mae_mm"]
+    ) / incumbent["track_balanced_width_mae_mm"]
+    worst_improvement = 100 * (
+        incumbent["worst_track_width_mae_mm"]
+        - promoted["worst_track_width_mae_mm"]
+    ) / incumbent["worst_track_width_mae_mm"]
+    boundary_improvement = 100 * (
+        incumbent["mean_boundary_mae_mm"] - promoted["mean_boundary_mae_mm"]
+    ) / incumbent["mean_boundary_mae_mm"]
+
     doc = SimpleDocTemplate(
         str(OUTPUT),
         pagesize=letter,
         leftMargin=inch,
         rightMargin=inch,
-        topMargin=0.8 * inch,
+        topMargin=inch,
         bottomMargin=0.8 * inch,
-        title="FMRG Final Report - Audited Local Geometry Prediction",
+        title="FMRG Final Submission - Hierarchical Local Geometry Prediction",
         author="Team Submission",
     )
-    story = [
-        # Page 1 - result first.
-        Paragraph("NSF FUTURE MANUFACTURING DATA CHALLENGE | FINAL SUBMISSION", style["kicker"]),
-        Paragraph("Predicting local DED track width from thermal history", style["title"]),
-        Paragraph(
-            "Audited physical alignment, local boundaries, uncertainty, and held-out "
-            "cross-condition evaluation.",
-            style["subtitle"],
-        ),
-        HRFlowable(width="100%", thickness=2, color=BLUE, spaceAfter=7),
-        Paragraph("Executive result", style["h1"]),
-        Paragraph(
-            "On untouched Track 21, the audited thermal-history Ridge model reduces local-width "
-            "MAE by <b>12.3%</b> relative to the original notebook Gradient Boosting baseline "
-            "retrained under the same split. It is a better benchmark, not a control-ready model: "
-            "held-out R^2 remains negative and the nominal 90% interval under-covers.",
-            style["body"],
-        ),
-        Table(
-            [[
-                metric_card("0.139 mm", "Held-out MAE", style),
-                metric_card("12.3%", "MAE reduction", style),
-                metric_card("0.088 mm", "Grouped CV MAE", style),
-                metric_card("76.5%", "Interval coverage", style),
-            ]],
-            colWidths=[1.62 * inch] * 4,
-        ),
-        Spacer(1, 7),
-        table(
-            [
-                ["Model", "MAE", "RMSE", "R^2", "Coverage"],
-                [
-                    "Notebook Gradient Boosting",
-                    f"{baseline['test_metrics']['mae_mm']:.3f} mm",
-                    f"{baseline['test_metrics']['rmse_mm']:.3f} mm",
-                    f"{baseline['test_metrics']['r2']:.2f}",
-                    f"{100 * baseline['test_interval_metrics']['coverage']:.1f}%",
-                ],
-                [
-                    "Audited Ridge alpha=10",
-                    f"{corrected['test_metrics']['mae_mm']:.3f} mm",
-                    f"{corrected['test_metrics']['rmse_mm']:.3f} mm",
-                    f"{corrected['test_metrics']['r2']:.2f}",
-                    f"{100 * corrected['test_interval_metrics']['coverage']:.1f}%",
-                ],
-            ],
-            style,
-            [2.25 * inch, 1.05 * inch, 1.05 * inch, 0.75 * inch, 1.4 * inch],
-        ),
-        Spacer(1, 7),
-        Image(
-            str(FIGURES / "track21_held_out_comparison.png"),
-            width=6.45 * inch,
-            height=2.55 * inch,
-        ),
-        Paragraph(
-            "Figure 1. Measured local width, reproduced notebook baseline, audited prediction, "
-            "and development-calibrated interval on held-out Track 21.",
-            style["small"],
-        ),
-        PageBreak(),
+    story = []
 
-        # Page 2 - method and audit.
-        section("Method: local geometry without label leakage", style),
-        Paragraph(
-            "<b>Target and alignment.</b> Each profilometer cross-section is robustly detrended. "
-            "Connected 30%-of-peak crossings around the central bead maximum define left and right "
-            "boundaries; width is their difference. Invalid acquisition gaps remain excluded. "
-            "Thermal frames map to physical x using 10 mm/s at 50 fps (0.2 mm/frame).",
-            style["body"],
-        ),
-        Paragraph(
-            "<b>Thermal history.</b> Features include hot-region area, bounding-box geometry, "
-            "equivalent diameter, elongation, temperature percentiles, hot-region mean, thermal "
-            "mass, gradients, asymmetry, deltas, one-frame lags, three-frame rolling means, and "
-            "low-order physical-x harmonics.",
-            style["body"],
-        ),
-        table(
-            [
-                ["Audit item", "Prior artifact", "Audited protocol"],
-                ["Target", "Height/average language", "Spatial width plus both boundaries"],
-                ["Alignment", "Normalized row position", "Physical x in millimeters"],
-                ["Selection", "Random split / test reused", "Grouped CV on Tracks 8, 10, 14"],
-                ["Final test", "No untouched condition", "Track 21 opened once"],
-                ["SEM", "Assumed dominant", "Masked ablation; rejected when CV worsened"],
-                ["Uncertainty", "Implied reliability", "Conformal interval plus observed coverage"],
-            ],
-            style,
-            [1.15 * inch, 2.25 * inch, 3.1 * inch],
-        ),
-        Spacer(1, 6),
-        Paragraph("Selection and interpretation", style["h2"]),
-        Paragraph(
-            "Ridge alpha=10 with thermal-only features minimizes leave-one-track-out development "
-            "MAE (0.0876 mm). The best thermal-plus-masked-SEM candidate reaches 0.1135 mm, so SEM "
-            "is not selected. With only four conditions, process and substrate effects are not "
-            "identifiable; the report makes no causal substrate claim.",
-            style["body"],
-        ),
-        Image(
-            str(FIGURES / "feature_importance.png"),
-            width=5.95 * inch,
-            height=2.65 * inch,
-        ),
-        Paragraph(
-            "Figure 2. Development-validation permutation importance. Hot-region temperature and "
-            "thermal mass lead; importance indicates association, not causality.",
-            style["small"],
-        ),
-        PageBreak(),
-
-        # Page 3 - boundaries, limitations, reproducibility.
-        section("Boundary results, uncertainty, and release gates", style),
-        table(
-            [
-                ["Held-out signal", "MAE", "RMSE", "R^2"],
-                [
-                    "Left boundary",
-                    f"{boundary['left']['mae_mm']:.3f} mm",
-                    f"{boundary['left']['rmse_mm']:.3f} mm",
-                    f"{boundary['left']['r2']:.2f}",
-                ],
-                [
-                    "Right boundary",
-                    f"{boundary['right']['mae_mm']:.3f} mm",
-                    f"{boundary['right']['rmse_mm']:.3f} mm",
-                    f"{boundary['right']['r2']:.2f}",
-                ],
-                ["Mean boundary MAE", f"{boundary['mean_boundary_mae_mm']:.3f} mm", "-", "-"],
-            ],
-            style,
-            [2.55 * inch, 1.35 * inch, 1.35 * inch, 1.25 * inch],
-        ),
-        Spacer(1, 7),
-        Paragraph("What is supported", style["h2"]),
-        bullet("Held-out width MAE and RMSE improve under a strict, same-sample comparison.", style),
-        bullet("Short thermal history generalizes better than masked SEM on this split.", style),
-        bullet("Connected boundary extraction produces explicit local left/right predictions.", style),
-        Paragraph("What remains open", style["h2"]),
-        bullet("Held-out R^2 is -0.58; the unseen-condition shift still dominates local fit.", style),
-        bullet("Nominal 90% intervals cover 76.5% of Track 21, below the target.", style),
-        bullet("Track 21 profilometry is incomplete; only valid aligned regions are scored.", style),
-        bullet("Four conditions cannot separate substrate-driven from process-driven variation.", style),
-        Spacer(1, 4),
-        Table(
-            [[Paragraph(
-                "Release gate: do not use this model for closed-loop control until interval coverage "
-                "and positive held-out R^2 are demonstrated across additional powers, plates, and repeats.",
-                style["callout"],
-            )]],
-            colWidths=[6.5 * inch],
-            style=TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, -1), PALE),
-                    ("BOX", (0, 0), (-1, -1), 0.7, ORANGE),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                    ("TOPPADDING", (0, 0), (-1, -1), 7),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
-                ]
+    story.extend(
+        [
+            Paragraph("NSF FUTURE MANUFACTURING DATA CHALLENGE", style["kicker"]),
+            Paragraph(
+                "Predicting local DED track geometry from thermal history",
+                style["title"],
             ),
-        ),
-        Paragraph("Reproduce", style["h2"]),
-        Paragraph(
-            "<font name='Courier'>python scripts/run_final_analysis.py --raw-dir /path/to/data "
-            "--output-dir results/final_submission</font><br/>"
-            "<font name='Courier'>python -m pytest</font><br/>"
-            "<font name='Courier'>python scripts/build_final_report.py</font>",
-            style["small"],
-        ),
-        Paragraph("Generative AI disclosure", style["h2"]),
-        Paragraph(
-            "OpenAI Codex assisted with code review, test generation, debugging, and artifact "
-            "layout. Reported metrics were produced by the tracked analysis code and verified "
-            "against saved predictions; AI did not supply or alter experimental measurements.",
-            style["small"],
-        ),
-        Paragraph("Sources and submission record", style["h2"]),
-        Paragraph(
-            "Dataset: https://doi.org/10.5281/zenodo.21285367<br/>"
-            "Paper: https://arxiv.org/abs/2607.07965<br/>"
-            "Locked metrics: results/final_submission/metrics.json<br/>"
-            "Executed notebook: notebooks/03_final_submission_audited.ipynb",
-            style["small"],
-        ),
-        Spacer(1, 6),
-        Paragraph(
-            "<b>Bottom line:</b> the audited model is measurably better than the reproduced notebook "
-            "baseline while the negative R^2 and interval under-coverage keep the claim honest.",
-            style["body"],
-        ),
-    ]
+            Paragraph(
+                "Hierarchical condition baselines, causal multiscale descriptors, physically "
+                "consistent boundaries, and nested four-track validation",
+                style["subtitle"],
+            ),
+            metric_strip(
+                [
+                    (f"{promoted['track_balanced_width_mae_mm']:.3f} mm", "four-track width MAE"),
+                    (f"{improvement:.1f}%", "lower than direct Ridge"),
+                    (f"{promoted['mean_boundary_mae_mm']:.3f} mm", "mean boundary MAE"),
+                    (f"{uncertainty['conditional']['coverage'] * 100:.1f}%", "conditional coverage"),
+                ],
+                style,
+            ),
+            Spacer(1, 7),
+            section("Executive summary", style),
+            Paragraph(
+                "A laser track is a spatial signal, not one average width. We align each active "
+                "thermal frame to physical x, extract the local track center and connected "
+                "left/right profilometry boundaries, and evaluate every track as an untouched "
+                "condition. The promoted nested selector reduces track-balanced width MAE from "
+                f"<b>{incumbent['track_balanced_width_mae_mm']:.3f} mm</b> to "
+                f"<b>{promoted['track_balanced_width_mae_mm']:.3f} mm</b> ({improvement:.1f}%), "
+                f"worst-track MAE by {worst_improvement:.1f}%, and boundary MAE by "
+                f"{boundary_improvement:.1f}%.",
+                style["body"],
+            ),
+            Paragraph(
+                "The key modeling change is to predict condition-level baseline center and "
+                "log-width from track summaries, then predict local residuals from frame history. "
+                "This directly addresses cross-power mean shifts and over-smoothed local signals.",
+                style["body"],
+            ),
+            section("Problem formulation and data alignment", style),
+            Paragraph(
+                "For each valid x location, targets are width, center, left boundary, and right "
+                "boundary. Profilometry cross-sections are robustly detrended; connected "
+                "30%-of-peak crossings around the bead define the boundaries. Thermal frames map "
+                "to x using 10 mm/s at 50 fps (0.2 mm/frame). Frames farther than 0.10 mm from "
+                "valid geometry are excluded, and only the 24-96 mm steady-state region is scored.",
+                style["body"],
+            ),
+            Paragraph("Leakage controls", style["h2"]),
+            bullet(
+                "Outer leave-one-track-out tests hold out Tracks 8, 10, 14, and 21 in turn.",
+                style,
+            ),
+            bullet(
+                "Feature family, estimator, preprocessing, and interval calibration are chosen "
+                "inside the other three tracks by inner leave-one-track-out validation.",
+                style,
+            ),
+            bullet(
+                "Thermal history is causal: current and earlier frames only. Headline scores are "
+                "unweighted means of per-track outer metrics.",
+                style,
+            ),
+            Paragraph("Generative AI use", style["h2"]),
+            Paragraph(
+                "OpenAI Codex assisted with code review, tests, debugging, and document layout. "
+                "All numbers come from tracked analysis code and saved outer-fold predictions; "
+                "AI did not supply or alter experimental measurements.",
+                style["body"],
+            ),
+            PageBreak(),
+        ]
+    )
 
+    story.extend(
+        [
+            section("Method: preserve condition shifts and local variation", style),
+            Paragraph(
+                "<b>Thermal descriptors.</b> Instantaneous features cover hot-region area and "
+                "axes, temperature percentiles, thermal mass, gradients, asymmetry, cooling-tail "
+                "area/decay, centroid velocity, and pool-shape change. Causal 5-, 10-, and "
+                "20-frame windows add means, slopes, changes, persistence above fixed temperature "
+                "thresholds, and history-availability flags. Robust within-track normalization "
+                "isolates local deviations without exposing held-out geometry.",
+                style["body"],
+            ),
+            Paragraph(
+                "<b>Constrained multi-output prediction.</b> Track thermal summaries predict "
+                "baseline center and baseline log-width. Local features jointly predict center "
+                "and log-width residuals. Exponentiating log-width guarantees positive width; "
+                "left/right are reconstructed from one shared center and width, so boundaries "
+                "remain ordered.",
+                style["body"],
+            ),
+            Paragraph(
+                "<b>Low-capacity model ladder.</b> Inner folds compare Ridge, elastic net, partial "
+                "least squares, spline-Ridge, and a Gaussian process. Within 0.02 mm of the best "
+                "inner MAE, selection favors lower variation-scale error and higher residual "
+                "correlation. Spline-Ridge with normalized compact thermal features wins three "
+                "outer folds; Track 14 independently chooses normalized multiscale Ridge.",
+                style["body"],
+            ),
+            Spacer(1, 4),
+            Image(str(FIGURES / "nested_outer_predictions.png"), width=6.5 * inch, height=3.28 * inch),
+            Paragraph(
+                "Figure 1. Measured and predicted local width for four untouched outer tracks. "
+                "Each panel is produced by a model selected without that track's labels.",
+                style["small"],
+            ),
+            Spacer(1, 5),
+            report_table(
+                [
+                    ["Metric", "Direct Ridge", "Hierarchical selector", "Change"],
+                    [
+                        "Track-balanced width MAE",
+                        f"{incumbent['track_balanced_width_mae_mm']:.3f} mm",
+                        f"{promoted['track_balanced_width_mae_mm']:.3f} mm",
+                        f"-{improvement:.1f}%",
+                    ],
+                    [
+                        "Worst-track width MAE",
+                        f"{incumbent['worst_track_width_mae_mm']:.3f} mm",
+                        f"{promoted['worst_track_width_mae_mm']:.3f} mm",
+                        f"-{worst_improvement:.1f}%",
+                    ],
+                    [
+                        "Mean left/right boundary MAE",
+                        f"{incumbent['mean_boundary_mae_mm']:.3f} mm",
+                        f"{promoted['mean_boundary_mae_mm']:.3f} mm",
+                        f"-{boundary_improvement:.1f}%",
+                    ],
+                    [
+                        "Residual correlation",
+                        f"{incumbent['residual_correlation']:.3f}",
+                        f"{promoted['residual_correlation']:.3f}",
+                        f"{promoted['residual_correlation'] / incumbent['residual_correlation']:.2f}x",
+                    ],
+                    [
+                        "Predicted/measured variation std.",
+                        f"{incumbent['variation_std_ratio']:.3f}",
+                        f"{promoted['variation_std_ratio']:.3f}",
+                        "+0.142",
+                    ],
+                ],
+                style,
+                [2.15 * inch, 1.35 * inch, 1.7 * inch, 1.3 * inch],
+            ),
+            PageBreak(),
+        ]
+    )
+
+    story.extend(
+        [
+            section("Uncertainty, interpretation, and limits", style),
+            Image(str(FIGURES / "before_after_scorecard.png"), width=6.5 * inch, height=2.48 * inch),
+            Paragraph(
+                "Figure 2. The promoted model improves accuracy, boundary position, and local "
+                "variation fidelity under the same four-track outer protocol.",
+                style["small"],
+            ),
+            Paragraph("Conditional uncertainty", style["h2"]),
+            Paragraph(
+                "Normalized conformal intervals scale by predicted local difficulty. Conditional "
+                f"coverage is <b>{uncertainty['conditional']['coverage'] * 100:.1f}%</b> with "
+                f"<b>{uncertainty['conditional']['mean_width_mm']:.3f} mm</b> mean width, versus "
+                f"{uncertainty['global']['coverage'] * 100:.1f}% and "
+                f"{uncertainty['global']['mean_width_mm']:.3f} mm for a fixed global interval. "
+                "Mean width expands from "
+                f"{uncertainty['conditional_by_difficulty']['low']['mean_width_mm']:.3f} mm in "
+                f"easy regions to {uncertainty['conditional_by_difficulty']['high']['mean_width_mm']:.3f} mm "
+                "in difficult regions.",
+                style["body"],
+            ),
+            Paragraph("Interpretable links and substrate evidence", style["h2"]),
+            Paragraph(
+                "Track-level hot area, maximum temperature, thermal mass, and cooling-tail "
+                "summaries anchor the condition baseline. Normalized pool shape, temperature, "
+                "asymmetry, and recent history contribute local residual information. These are "
+                "predictive associations. The available SEM is post-process; after masking the "
+                "processed center, SEM is selected in <b>zero</b> outer folds. We therefore make "
+                "no causal pre-process substrate claim.",
+                style["body"],
+            ),
+            Paragraph("Limitations", style["h2"]),
+            bullet(
+                f"Track-balanced R-squared remains {promoted['track_balanced_width_r2']:.2f}; "
+                "the result is not ready for closed-loop control.",
+                style,
+            ),
+            bullet(
+                "Only four independent tracks are available, so model ranking and interval "
+                "coverage remain uncertain across new plates and recipes.",
+                style,
+            ),
+            bullet(
+                "The earlier 0.139 mm Track 21 result is a historical tuned split. Under the "
+                f"stronger nested protocol, Track 21 MAE is "
+                f"{promoted['per_track']['21']['width_mae_mm']:.3f} mm.",
+                style,
+            ),
+            bullet(
+                "Genuine pre-process SEM or surface measurements registered to physical x are "
+                "needed to distinguish substrate-driven from process-driven variation.",
+                style,
+            ),
+            Paragraph("Conclusion", style["h2"]),
+            Paragraph(
+                "Separating condition-level geometry from local residual variation produces a "
+                "more accurate, less over-smoothed, physically consistent predictor. The next "
+                "decisive study should add powers, plates, repeats, and registered pre-process "
+                "surface measurements, then test the locked pipeline on blind tracks.",
+                style["body"],
+            ),
+            Paragraph("Reproduction and sources", style["h2"]),
+            Paragraph(
+                "<font name='Courier'>PYTHONPATH=src LOKY_MAX_CPU_COUNT=1 MPLBACKEND=Agg "
+                ".venv/bin/python scripts/run_improvement_experiments.py "
+                "--raw-dir /path/to/data --cache-dir /path/to/cache "
+                "--output-dir results/improved_submission</font><br/>"
+                "Dataset: doi:10.5281/zenodo.21285367; paper: arXiv:2607.07965; "
+                "locked metrics: results/improved_submission/metrics.json.",
+                style["small"],
+            ),
+        ]
+    )
+
+    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     doc.build(story, onFirstPage=footer, onLaterPages=footer)
     print(OUTPUT)
 

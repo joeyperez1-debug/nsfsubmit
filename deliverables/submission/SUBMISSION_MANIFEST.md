@@ -1,4 +1,4 @@
-# FMRG audited final submission
+# FMRG improved final submission
 
 The ZIP built by `scripts/build_submission_package.py` contains:
 
@@ -6,7 +6,7 @@ The ZIP built by `scripts/build_submission_package.py` contains:
 - the compliant three-page final report PDF;
 - the editable presentation deck and exported presentation PDF;
 - the deck template and rebuild script;
-- locked metrics, predictions, and figures;
+- nested four-track metrics, predictions, candidate scores, and figures;
 - analysis source modules and tests;
 - both GitHub repository URLs.
 

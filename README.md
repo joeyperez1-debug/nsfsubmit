@@ -1,25 +1,47 @@
-# FMRG Audited Final Submission
+# FMRG Improved Final Submission
 
 This repository contains the final model and submission artifacts for
-predicting spatially varying DED track width and left/right boundaries from
-thermal history.
+predicting spatially varying DED track width, center, and left/right boundaries
+from thermal history.
 
 The official multimodal dataset is hosted on Zenodo:
 [10.5281/zenodo.21285367](https://doi.org/10.5281/zenodo.21285367).
 
-## Audited result
+## Nested four-track result
 
-Tracks 8, 10, and 14 are used for grouped model selection and uncertainty
-calibration. Track 21 is held out until final scoring.
+Tracks 8, 10, 14, and 21 are each held out once. Feature family, estimator,
+preprocessing, and uncertainty calibration are selected by leave-one-track-out
+validation using only the other three tracks.
 
-| Model | Track 21 MAE | Track 21 RMSE | Track 21 R² |
+| Metric | Direct Ridge | Hierarchical selector | Change |
 |---|---:|---:|---:|
-| Reproduced notebook Gradient Boosting | 0.159 mm | 0.187 mm | -0.99 |
-| Audited Ridge alpha 10 | 0.139 mm | 0.167 mm | -0.58 |
+| Track-balanced width MAE | 0.187 mm | 0.163 mm | -13.1% |
+| Worst-track width MAE | 0.308 mm | 0.219 mm | -28.9% |
+| Mean boundary MAE | 0.180 mm | 0.148 mm | -17.6% |
+| Residual correlation | 0.055 | 0.124 | 2.26× |
+| Predicted/measured variation std. | 0.214 | 0.356 | +0.142 |
 
-The audited model reduces held-out MAE by **12.3%**. Nominal 90% interval
-coverage is **76.5%**, so this is a better benchmark rather than a
-closed-loop-ready controller.
+Conditional conformal intervals cover **91.4%** of outer samples with
+**0.738 mm** mean width, versus **94.2%** and **0.824 mm** for a fixed global
+interval. Track-balanced R² remains **-0.34**, so this is a stronger benchmark,
+not a closed-loop-ready controller.
+
+The earlier 0.139 mm Track 21 result is retained only as a historical tuned
+split. Under the stronger nested protocol, Track 21 receives no special tuning
+and scores 0.219 mm.
+
+## Method
+
+- Track-level thermal summaries predict baseline center and log-width.
+- Causal local descriptors predict center and log-width residuals.
+- Thermal history includes pool shape, cooling tail, motion, asymmetry,
+  persistence, and 5-, 10-, and 20-frame statistics.
+- Positive width and ordered boundaries are enforced by reconstruction from
+  one shared center and exponentiated log-width.
+- Ridge, elastic net, partial least squares, spline-Ridge, and Gaussian process
+  candidates are selected inside nested track-level folds.
+- Available SEM is post-process, the processed center is masked, and SEM is
+  selected in zero outer folds. No causal substrate claim is made.
 
 ## Final deliverables
 
@@ -27,8 +49,9 @@ closed-loop-ready controller.
 - `deliverables/report/FMRG_Final_Report_Audited.pdf` - compliant three-page report.
 - `deliverables/presentation/FMRG_Final_Submission_Audited.pptx` - editable deck.
 - `deliverables/presentation/FMRG_Final_Submission_Audited.pdf` - exported deck.
-- `results/final_submission/` - locked metrics, predictions, and figures.
-- `src/fmrg_submission/` - audited geometry, thermal, SEM, and modeling code.
+- `results/improved_submission/` - nested metrics, predictions, and figures.
+- `src/fmrg_submission/` - geometry, thermal, targets, evaluation, uncertainty,
+  SEM ablation, and experiment code.
 - `tests/` - regression tests for the critical pipeline logic.
 
 The prior `notebooks/finalnotebook.ipynb` is retained as a legacy artifact for
@@ -38,9 +61,11 @@ comparison.
 
 ```bash
 python -m pip install -r requirements.txt
-python scripts/run_final_analysis.py \
+PYTHONPATH=src LOKY_MAX_CPU_COUNT=1 MPLBACKEND=Agg \
+  .venv/bin/python scripts/run_improvement_experiments.py \
   --raw-dir /path/to/extracted/zenodo/data \
-  --output-dir results/final_submission
+  --cache-dir /path/to/cache \
+  --output-dir results/improved_submission
 python -m pytest
 ```
 
