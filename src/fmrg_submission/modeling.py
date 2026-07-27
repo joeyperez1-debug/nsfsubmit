@@ -7,16 +7,26 @@ import math
 import numpy as np
 import pandas as pd
 from sklearn.base import clone
+from sklearn.cross_decomposition import PLSRegression
+from sklearn.decomposition import PCA
 from sklearn.ensemble import (
     ExtraTreesRegressor,
     GradientBoostingRegressor,
     HistGradientBoostingRegressor,
 )
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import ConstantKernel, RBF, WhiteKernel
 from sklearn.impute import SimpleImputer
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import MultiTaskElasticNet, Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import SplineTransformer, StandardScaler
+
+from .targets import (
+    add_hierarchical_targets,
+    reconstruct_geometry,
+    track_thermal_summaries,
+)
 
 
 GEOMETRY_COLUMNS = ("width_mm", "left_mm", "right_mm")
@@ -103,6 +113,152 @@ def interval_metrics(
     }
 
 
+def candidate_estimators(*, random_state: int = 42) -> dict[str, object]:
+    """Return deterministic low-capacity estimators for two geometry outputs."""
+    gaussian_kernel = (
+        ConstantKernel(1.0, constant_value_bounds="fixed")
+        * RBF(1.0, length_scale_bounds="fixed")
+        + WhiteKernel(0.05, noise_level_bounds="fixed")
+    )
+    return {
+        "ridge": make_pipeline(
+            SimpleImputer(strategy="median"),
+            StandardScaler(),
+            Ridge(alpha=10.0),
+        ),
+        "elastic_net": make_pipeline(
+            SimpleImputer(strategy="median"),
+            StandardScaler(),
+            MultiTaskElasticNet(
+                alpha=0.01,
+                l1_ratio=0.1,
+                max_iter=10000,
+                random_state=random_state,
+            ),
+        ),
+        "pls": make_pipeline(
+            SimpleImputer(strategy="median"),
+            StandardScaler(),
+            PLSRegression(n_components=2, scale=False, max_iter=1000),
+        ),
+        "spline_ridge": make_pipeline(
+            SimpleImputer(strategy="median"),
+            SplineTransformer(n_knots=4, degree=2, include_bias=False),
+            StandardScaler(),
+            Ridge(alpha=100.0),
+        ),
+        "gaussian_process": make_pipeline(
+            SimpleImputer(strategy="median"),
+            StandardScaler(),
+            PCA(n_components=0.95, svd_solver="full"),
+            GaussianProcessRegressor(
+                kernel=gaussian_kernel,
+                alpha=1e-6,
+                optimizer=None,
+                normalize_y=True,
+                random_state=random_state,
+            ),
+        ),
+    }
+
+
+def _as_two_output(prediction: np.ndarray) -> np.ndarray:
+    prediction = np.asarray(prediction, dtype=float)
+    if prediction.ndim == 1:
+        prediction = prediction.reshape(-1, 1)
+    if prediction.shape[1] != 2:
+        raise ValueError("Geometry estimator must predict center and log-width")
+    return prediction
+
+
+def fit_hierarchical_candidate(
+    train: pd.DataFrame,
+    test: pd.DataFrame,
+    *,
+    local_features: list[str],
+    summary_features: list[str],
+    estimator: object,
+) -> pd.DataFrame:
+    """Predict held-out geometry without using held-out geometry summaries."""
+    if train["track_id"].nunique() < 2:
+        raise ValueError("At least two training tracks are required")
+    summary_sources = sorted(
+        {feature.rsplit("__", 1)[0] for feature in summary_features}
+    )
+    required_features = {*local_features, *summary_sources}
+    missing = required_features.difference(train.columns).union(
+        required_features.difference(test.columns)
+    )
+    if missing:
+        raise ValueError(f"Missing thermal features: {sorted(missing)}")
+
+    train_targets = add_hierarchical_targets(train)
+    train_summary = track_thermal_summaries(train_targets, summary_sources)
+    test_summary = track_thermal_summaries(test, summary_sources)
+    baseline_targets = (
+        train_targets.groupby("track_id", sort=True)[
+            ["baseline_center_mm", "baseline_log_width"]
+        ]
+        .first()
+        .reset_index()
+    )
+    baseline_train = train_summary.merge(
+        baseline_targets, on="track_id", validate="one_to_one"
+    )
+    baseline_model = make_pipeline(
+        SimpleImputer(strategy="median"),
+        StandardScaler(),
+        Ridge(alpha=10.0),
+    )
+    baseline_model.fit(
+        baseline_train[summary_features],
+        baseline_train[["baseline_center_mm", "baseline_log_width"]],
+    )
+    baseline_by_track = _as_two_output(
+        baseline_model.predict(test_summary[summary_features])
+    )
+    baseline_lookup = {
+        track_id: baseline_by_track[index]
+        for index, track_id in enumerate(test_summary["track_id"])
+    }
+    row_baseline = np.vstack(
+        [baseline_lookup[track_id] for track_id in test["track_id"]]
+    )
+
+    local_model = clone(estimator)
+    local_model.fit(
+        train_targets[local_features],
+        train_targets[["center_residual_mm", "log_width_residual"]],
+    )
+    local_prediction = _as_two_output(local_model.predict(test[local_features]))
+    geometry = reconstruct_geometry(
+        row_baseline[:, 0],
+        row_baseline[:, 1],
+        local_prediction[:, 0],
+        local_prediction[:, 1],
+    )
+    identity_columns = [
+        column
+        for column in (
+            "track_id",
+            "x_mm",
+            "width_mm",
+            "center_mm",
+            "left_mm",
+            "right_mm",
+        )
+        if column in test.columns
+    ]
+    result = test[identity_columns].reset_index(drop=True).copy()
+    for column in ("width_mm", "center_mm", "left_mm", "right_mm"):
+        result[f"{column.removesuffix('_mm')}_prediction_mm"] = geometry[column]
+    result["baseline_center_prediction_mm"] = row_baseline[:, 0]
+    result["baseline_log_width_prediction"] = row_baseline[:, 1]
+    result["center_residual_prediction_mm"] = local_prediction[:, 0]
+    result["log_width_residual_prediction"] = local_prediction[:, 1]
+    return result
+
+
 def _candidate_estimators() -> dict[str, object]:
     return {
         "ridge_1": make_pipeline(
@@ -118,7 +274,7 @@ def _candidate_estimators() -> dict[str, object]:
                 min_samples_leaf=5,
                 max_features=0.75,
                 random_state=42,
-                n_jobs=-1,
+                n_jobs=1,
             ),
         ),
         "hist_gradient_boosting": make_pipeline(

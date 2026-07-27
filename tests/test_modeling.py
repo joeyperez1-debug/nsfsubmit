@@ -3,7 +3,9 @@ import pandas as pd
 
 from fmrg_submission.modeling import (
     align_geometry_to_frames,
+    candidate_estimators,
     conformal_half_width,
+    fit_hierarchical_candidate,
     fit_grouped_final_comparison,
     fit_leakage_safe_comparison,
     group_robust_conformal_half_width,
@@ -113,6 +115,70 @@ def test_model_selection_and_predictions_do_not_use_validation_or_test_labels():
     assert np.allclose(
         first["corrected"]["test_prediction"],
         second["corrected"]["test_prediction"],
+    )
+
+
+def _hierarchical_data():
+    rows = []
+    for track_id, offset in [(8, 0.0), (10, 0.1), (14, 0.2)]:
+        for index in range(10):
+            signal = index / 9
+            width = 0.5 + offset + 0.05 * np.sin(2 * np.pi * signal)
+            center = 1.0 + 0.5 * offset + 0.02 * np.cos(2 * np.pi * signal)
+            rows.append(
+                {
+                    "track_id": track_id,
+                    "x_mm": signal,
+                    "signal": signal + offset,
+                    "width_mm": width,
+                    "center_mm": center,
+                    "left_mm": center - width / 2,
+                    "right_mm": center + width / 2,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def test_candidate_ladder_contains_requested_low_capacity_models():
+    names = candidate_estimators().keys()
+
+    assert {
+        "ridge",
+        "elastic_net",
+        "pls",
+        "spline_ridge",
+        "gaussian_process",
+    } <= set(names)
+
+
+def test_hierarchical_prediction_ignores_held_out_geometry_summaries():
+    data = _hierarchical_data()
+    train = data[data["track_id"].isin([8, 10])]
+    test = data[data["track_id"] == 14]
+    estimator = candidate_estimators()["ridge"]
+
+    first = fit_hierarchical_candidate(
+        train,
+        test,
+        local_features=["signal"],
+        summary_features=["signal__median"],
+        estimator=estimator,
+    )
+    changed = test.copy()
+    changed[["width_mm", "center_mm", "left_mm", "right_mm"]] = 99.0
+    second = fit_hierarchical_candidate(
+        train,
+        changed,
+        local_features=["signal"],
+        summary_features=["signal__median"],
+        estimator=estimator,
+    )
+
+    assert np.allclose(
+        first["width_prediction_mm"], second["width_prediction_mm"]
+    )
+    assert np.allclose(
+        first["center_prediction_mm"], second["center_prediction_mm"]
     )
 
 
