@@ -30,6 +30,8 @@ from .targets import (
 
 
 GEOMETRY_COLUMNS = ("width_mm", "left_mm", "right_mm")
+WIDTH_DOMAIN_MM = (0.20, 1.60)
+CENTER_DOMAIN_MM = (0.30, 1.65)
 
 
 def align_geometry_to_frames(
@@ -237,6 +239,10 @@ def fit_hierarchical_candidate(
         local_prediction[:, 0],
         local_prediction[:, 1],
     )
+    geometry["center_mm"] = geometry["center_mm"].clip(*CENTER_DOMAIN_MM)
+    geometry["width_mm"] = geometry["width_mm"].clip(*WIDTH_DOMAIN_MM)
+    geometry["left_mm"] = geometry["center_mm"] - 0.5 * geometry["width_mm"]
+    geometry["right_mm"] = geometry["center_mm"] + 0.5 * geometry["width_mm"]
     identity_columns = [
         column
         for column in (

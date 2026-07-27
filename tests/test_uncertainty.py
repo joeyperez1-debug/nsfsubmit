@@ -6,6 +6,7 @@ from fmrg_submission.uncertainty import (
     fit_local_scale,
     normalized_conformal_interval,
     predict_local_scale,
+    shrink_local_scale,
 )
 
 
@@ -57,3 +58,12 @@ def test_local_scale_increases_with_observed_difficulty():
 
     assert (scale > 0).all()
     assert scale[-1] > scale[0]
+
+
+def test_scale_shrinkage_preserves_order_and_reduces_extreme_ratio():
+    scale = np.array([1.0, 4.0, 16.0])
+
+    shrunk = shrink_local_scale(scale, strength=0.5)
+
+    assert np.allclose(shrunk, [2.0, 4.0, 8.0])
+    assert shrunk[-1] / shrunk[0] < scale[-1] / scale[0]

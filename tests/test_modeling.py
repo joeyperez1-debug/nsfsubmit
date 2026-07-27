@@ -182,6 +182,29 @@ def test_hierarchical_prediction_ignores_held_out_geometry_summaries():
     )
 
 
+def test_hierarchical_prediction_respects_measured_geometry_domain():
+    data = _hierarchical_data()
+    train = data[data["track_id"].isin([8, 10])]
+    test = data[data["track_id"] == 14].copy()
+    test["signal"] = 1e9
+
+    prediction = fit_hierarchical_candidate(
+        train,
+        test,
+        local_features=["signal"],
+        summary_features=["signal__median"],
+        estimator=candidate_estimators()["ridge"],
+    )
+
+    assert prediction["width_prediction_mm"].between(0.20, 1.60).all()
+    assert prediction["center_prediction_mm"].between(0.30, 1.65).all()
+    assert np.allclose(
+        prediction["right_prediction_mm"]
+        - prediction["left_prediction_mm"],
+        prediction["width_prediction_mm"],
+    )
+
+
 def test_grouped_final_comparison_uses_only_development_tracks_for_selection():
     rows = []
     for track_id, offset in [(8, 0.0), (10, 0.1), (14, 0.2), (21, 0.3)]:

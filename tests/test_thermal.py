@@ -1,6 +1,10 @@
 import numpy as np
+import pandas as pd
 
-from fmrg_submission.thermal import extract_thermal_descriptors
+from fmrg_submission.thermal import (
+    add_within_track_normalized_features,
+    extract_thermal_descriptors,
+)
 
 
 def test_thermal_descriptors_capture_pool_geometry_and_asymmetry():
@@ -61,3 +65,23 @@ def test_early_history_has_missingness_flags_and_finite_defaults():
 
     assert result.loc[0, "roll20_history_fraction"] == 0.05
     assert np.isfinite(result.select_dtypes("number")).all().all()
+
+
+def test_within_track_normalization_removes_condition_level_shift_without_labels():
+    data = pd.DataFrame(
+        {
+            "track_id": [8, 8, 8, 10, 10, 10],
+            "thermal_mass": [1.0, 2.0, 3.0, 101.0, 102.0, 103.0],
+            "width_mm": [0.4, 0.5, 0.6, 0.8, 0.9, 1.0],
+        }
+    )
+
+    result = add_within_track_normalized_features(data, ["thermal_mass"])
+
+    medians = result.groupby("track_id")["local_thermal_mass"].median()
+    assert np.allclose(medians, 0.0)
+    assert np.allclose(
+        result.loc[result["track_id"] == 8, "local_thermal_mass"],
+        result.loc[result["track_id"] == 10, "local_thermal_mass"],
+    )
+    assert "local_width_mm" not in result

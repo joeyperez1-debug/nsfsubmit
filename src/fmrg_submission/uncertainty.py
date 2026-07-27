@@ -47,6 +47,28 @@ def predict_local_scale(
     return np.exp(np.clip(log_scale, -20.0, 20.0)).clip(min=1e-6)
 
 
+def shrink_local_scale(
+    scale: np.ndarray,
+    *,
+    strength: float = 0.5,
+    reference: float | None = None,
+) -> np.ndarray:
+    """Shrink noisy local scales toward a shared median in log space."""
+    scale = np.asarray(scale, dtype=float)
+    if np.any(~np.isfinite(scale)) or np.any(scale <= 0):
+        raise ValueError("local scales must be finite and positive")
+    if not 0 <= strength <= 1:
+        raise ValueError("strength must be between zero and one")
+    if reference is None:
+        reference = float(np.median(scale))
+    if not np.isfinite(reference) or reference <= 0:
+        raise ValueError("reference scale must be finite and positive")
+    log_scale = (
+        strength * np.log(scale) + (1.0 - strength) * np.log(reference)
+    )
+    return np.exp(log_scale)
+
+
 def normalized_conformal_interval(
     y_cal: np.ndarray,
     pred_cal: np.ndarray,

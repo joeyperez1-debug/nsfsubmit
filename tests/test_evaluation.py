@@ -5,7 +5,9 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 from fmrg_submission.evaluation import (
+    condition_summary_features,
     nested_leave_one_track_out,
+    select_inner_candidate,
     track_balanced_metrics,
 )
 
@@ -119,3 +121,51 @@ def test_nested_evaluation_calibrates_global_and_local_intervals_from_inner_fold
         > result["predictions"]["width_lower_90_mm"]
     ).all()
     assert {"conditional", "global"} <= result["uncertainty"].keys()
+
+
+def test_condition_baseline_uses_compact_summaries_not_local_history_expansion():
+    features = [
+        "hot_area_px",
+        "max_temperature",
+        "thermal_mass",
+        "roll20_hot_area_px_slope",
+        "roll10_thermal_mass_std",
+        "x_sin_1",
+    ]
+
+    summaries = condition_summary_features(features)
+
+    assert summaries == [
+        "hot_area_px__median",
+        "max_temperature__median",
+        "thermal_mass__median",
+    ]
+
+
+def test_inner_selection_prefers_spatial_fidelity_within_accuracy_tolerance():
+    flat = {
+        "feature_set": "wide",
+        "model": "gp",
+        "error": None,
+        "metrics": {
+            "track_balanced_width_mae_mm": 0.150,
+            "mean_boundary_mae_mm": 0.140,
+            "residual_correlation": 0.00,
+            "variation_std_ratio_error": 1.00,
+        },
+    }
+    spatial = {
+        "feature_set": "compact",
+        "model": "spline_ridge",
+        "error": None,
+        "metrics": {
+            "track_balanced_width_mae_mm": 0.165,
+            "mean_boundary_mae_mm": 0.145,
+            "residual_correlation": 0.12,
+            "variation_std_ratio_error": 0.60,
+        },
+    }
+
+    selected = select_inner_candidate([flat, spatial], accuracy_tolerance_mm=0.02)
+
+    assert selected["model"] == "spline_ridge"

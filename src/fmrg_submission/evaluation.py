@@ -18,7 +18,27 @@ from .uncertainty import (
     fit_local_scale,
     normalized_conformal_interval,
     predict_local_scale,
+    shrink_local_scale,
 )
+
+CONDITION_FEATURE_PRIORITY = (
+    "hot_area_px",
+    "max_temperature",
+    "thermal_mass",
+    "cooling_tail_integral",
+)
+
+
+def condition_summary_features(local_features: list[str]) -> list[str]:
+    """Choose a small, stable thermal basis for condition-level geometry."""
+    selected = [
+        feature
+        for feature in CONDITION_FEATURE_PRIORITY
+        if feature in local_features
+    ]
+    if not selected:
+        selected = local_features[: min(3, len(local_features))]
+    return [f"{feature}__median" for feature in selected]
 
 
 def _finite_mean(values: list[float]) -> float:
@@ -149,12 +169,59 @@ def _instantiate(factory: Callable[[], object] | object) -> object:
     return factory() if callable(factory) else clone(factory)
 
 
+def select_inner_candidate(
+    scores: list[dict[str, object]],
+    *,
+    accuracy_tolerance_mm: float = 0.02,
+) -> dict[str, object]:
+    """Choose spatial fidelity among candidates statistically close in MAE."""
+    if accuracy_tolerance_mm < 0:
+        raise ValueError("accuracy_tolerance_mm must be nonnegative")
+    valid = [
+        score
+        for score in scores
+        if score.get("error") is None
+        and np.isfinite(
+            score["metrics"]["track_balanced_width_mae_mm"]
+        )
+    ]
+    if not valid:
+        raise RuntimeError("Every inner candidate failed")
+    best_mae = min(
+        float(score["metrics"]["track_balanced_width_mae_mm"])
+        for score in valid
+    )
+    eligible = [
+        score
+        for score in valid
+        if float(score["metrics"]["track_balanced_width_mae_mm"])
+        <= best_mae + accuracy_tolerance_mm
+    ]
+
+    def selection_key(score: dict[str, object]) -> tuple:
+        metrics = score["metrics"]
+        correlation = float(metrics["residual_correlation"])
+        if not np.isfinite(correlation):
+            correlation = -1.0
+        spatial_loss = float(metrics["variation_std_ratio_error"]) - correlation
+        return (
+            spatial_loss,
+            float(metrics["mean_boundary_mae_mm"]),
+            float(metrics["track_balanced_width_mae_mm"]),
+            str(score["feature_set"]),
+            str(score["model"]),
+        )
+
+    return min(eligible, key=selection_key)
+
+
 def nested_leave_one_track_out(
     data: pd.DataFrame,
     feature_sets: dict[str, list[str]],
     estimator_factories: dict[str, Callable[[], object] | object],
     *,
     coverage: float = 0.90,
+    accuracy_tolerance_mm: float = 0.02,
 ) -> dict[str, object]:
     """Select models in inner track folds and evaluate each untouched outer track."""
     tracks = sorted(int(track) for track in data["track_id"].unique())
@@ -169,9 +236,9 @@ def nested_leave_one_track_out(
     for outer_track in tracks:
         outer_train = data[data["track_id"] != outer_track].copy()
         outer_test = data[data["track_id"] == outer_track].copy()
-        scored: list[tuple[tuple[float, float, float, str, str], dict[str, object]]] = []
+        scored: list[dict[str, object]] = []
         for feature_set_name, features in feature_sets.items():
-            summary_features = [f"{feature}__median" for feature in features]
+            summary_features = condition_summary_features(features)
             for model_name, factory in estimator_factories.items():
                 inner_predictions: list[pd.DataFrame] = []
                 error: str | None = None
@@ -193,26 +260,9 @@ def nested_leave_one_track_out(
                         inner_predictions.append(prediction)
                     combined = pd.concat(inner_predictions, ignore_index=True)
                     metrics = track_balanced_metrics(combined)
-                    correlation = metrics["residual_correlation"]
-                    if not np.isfinite(correlation):
-                        correlation = -1.0
-                    key = (
-                        float(metrics["track_balanced_width_mae_mm"]),
-                        float(metrics["mean_boundary_mae_mm"]),
-                        -float(correlation),
-                        feature_set_name,
-                        model_name,
-                    )
                 except (ValueError, np.linalg.LinAlgError) as exc:
                     error = f"{type(exc).__name__}: {exc}"
                     metrics = {}
-                    key = (
-                        float("inf"),
-                        float("inf"),
-                        float("inf"),
-                        feature_set_name,
-                        model_name,
-                    )
                 score = {
                     "outer_track": outer_track,
                     "feature_set": feature_set_name,
@@ -221,11 +271,11 @@ def nested_leave_one_track_out(
                     "error": error,
                 }
                 all_inner_scores.append(score)
-                scored.append((key, score))
+                scored.append(score)
 
-        selected_key, selected = min(scored, key=lambda item: item[0])
-        if not np.isfinite(selected_key[0]):
-            raise RuntimeError(f"Every candidate failed for outer Track {outer_track}")
+        selected = select_inner_candidate(
+            scored, accuracy_tolerance_mm=accuracy_tolerance_mm
+        )
         selected_features = feature_sets[str(selected["feature_set"])]
         selected_factory = estimator_factories[str(selected["model"])]
         calibration_predictions: list[pd.DataFrame] = []
@@ -240,15 +290,18 @@ def nested_leave_one_track_out(
                 calibration_train,
                 calibration_test,
                 local_features=selected_features,
-                summary_features=[
-                    f"{feature}__median" for feature in selected_features
-                ],
+                summary_features=condition_summary_features(
+                    selected_features
+                ),
                 estimator=_instantiate(selected_factory),
             )
-            for feature in selected_features:
-                calibration_prediction[feature] = calibration_test[
-                    feature
-                ].to_numpy()
+            calibration_prediction = pd.concat(
+                [
+                    calibration_prediction,
+                    calibration_test[selected_features].reset_index(drop=True),
+                ],
+                axis=1,
+            )
             calibration_predictions.append(calibration_prediction)
         calibration = pd.concat(calibration_predictions, ignore_index=True)
 
@@ -256,9 +309,7 @@ def nested_leave_one_track_out(
             outer_train,
             outer_test,
             local_features=selected_features,
-            summary_features=[
-                f"{feature}__median" for feature in selected_features
-            ],
+            summary_features=condition_summary_features(selected_features),
             estimator=_instantiate(selected_factory),
         )
         residuals = np.abs(
@@ -279,6 +330,17 @@ def nested_leave_one_track_out(
             scale_model,
             outer_test,
             feature_columns=selected_features,
+        )
+        scale_reference = float(np.median(calibration_scale))
+        calibration_scale = shrink_local_scale(
+            calibration_scale,
+            strength=0.5,
+            reference=scale_reference,
+        )
+        test_scale = shrink_local_scale(
+            test_scale,
+            strength=0.5,
+            reference=scale_reference,
         )
         local_lower, local_upper, local_quantile = (
             normalized_conformal_interval(

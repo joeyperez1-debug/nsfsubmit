@@ -214,3 +214,27 @@ def extract_thermal_descriptors(
     return pd.concat(
         [result, pd.DataFrame(history, index=result.index)], axis=1
     )
+
+
+def add_within_track_normalized_features(
+    data: pd.DataFrame,
+    feature_columns: list[str],
+    *,
+    prefix: str = "local_",
+) -> pd.DataFrame:
+    """Add label-free robust deviations from each track's thermal condition."""
+    missing = {"track_id", *feature_columns}.difference(data.columns)
+    if missing:
+        raise ValueError(f"Missing normalization columns: {sorted(missing)}")
+    grouped = data.groupby("track_id", sort=False)
+    normalized: dict[str, pd.Series] = {}
+    for column in feature_columns:
+        values = data[column].astype(float)
+        median = grouped[column].transform("median")
+        q25 = grouped[column].transform(lambda series: series.quantile(0.25))
+        q75 = grouped[column].transform(lambda series: series.quantile(0.75))
+        scale = (q75 - q25).where((q75 - q25).abs() > 1e-12, 1.0)
+        normalized[f"{prefix}{column}"] = (values - median) / scale
+    return pd.concat(
+        [data.copy(), pd.DataFrame(normalized, index=data.index)], axis=1
+    )
