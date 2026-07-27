@@ -1,0 +1,5 @@
+Primary repository:
+https://github.com/alphons3t/nsf-chuds
+
+Mirrored repository:
+https://github.com/joeyperez1-debug/nsfsubmit

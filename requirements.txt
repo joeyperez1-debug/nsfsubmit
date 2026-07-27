@@ -3,3 +3,9 @@ scipy
 matplotlib
 pillow
 pandas
+h5py
+scikit-learn
+nbformat
+nbclient
+reportlab
+pytest

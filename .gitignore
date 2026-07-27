@@ -2,6 +2,8 @@
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+.venv/
+node_modules
 
 # Local data and generated outputs
 data/raw/**/*.mat
@@ -29,3 +31,12 @@ processed_data/
 # OS
 .DS_Store
 Thumbs.db
+
+# Submission package
+deliverables/submission/*.zip
+
+# Local audit/render workspaces
+tmp/
+*.inspect.ndjson
+deliverables/presentation/FMRG_Data_Challenge_Presentation_McKinsey/
+results/initial_holdout_audit/

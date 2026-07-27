@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:deck": "node scripts/build_final_deck.mjs"
+  },
+  "dependencies": {
+    "@oai/artifact-tool": "2.8.31"
+  }
+}

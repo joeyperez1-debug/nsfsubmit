@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fmrg-final-submission"
+version = "1.0.0"
+description = "Leakage-safe local laser-track geometry prediction for the NSF FMRG challenge"
+requires-python = ">=3.10"
+dependencies = [
+  "h5py",
+  "matplotlib",
+  "nbclient",
+  "nbformat",
+  "numpy",
+  "pandas",
+  "pillow",
+  "reportlab",
+  "scikit-learn",
+  "scipy",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
